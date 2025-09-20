@@ -1,302 +1,227 @@
-// components/BrokerConnection.tsx
+// hooks/useBrokerConnection.ts
 'use client'
 
-import { useState } from 'react'
-import { Button } from "@workspace/ui/components/button"
-import {
-  Card,
-  CardContent,
-  CardDescription,
-  CardHeader,
-  CardTitle,
-} from "@workspace/ui/components/card"
-import {
-  Dialog,
-  DialogContent,
-  DialogDescription,
-  DialogHeader,
-  DialogTitle,
-  DialogTrigger,
-} from "@workspace/ui/components/dialog"
-import { Input } from "@workspace/ui/components/input"
-import { Label } from "@workspace/ui/components/label"
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from "@workspace/ui/components/select"
-import { Alert, AlertDescription } from "@workspace/ui/components/alert"
-import { Badge } from "@workspace/ui/components/badge"
-import { Trash2, RefreshCw, Plus, AlertCircle, CheckCircle, Clock } from 'lucide-react'
-import { useBrokerConnection, BrokerCredentials } from '@/hooks/useBrokerConnection'
+import { useState, useEffect } from 'react'
+import { createClient } from '@/utils/supabase/client'
+import { useAuth } from '@/components/AuthProvider'
 
-export function BrokerConnectionCard() {
-  const { connections, loading, error, addBrokerConnection, removeBrokerConnection, refreshBrokerToken } = useBrokerConnection()
-  const [isDialogOpen, setIsDialogOpen] = useState(false)
-  const [formData, setFormData] = useState<BrokerCredentials>({
-    broker_name: 'upstox',
-    broker_user_id: '',
-    api_key: '',
-    api_secret: '',
-  })
-  const [formLoading, setFormLoading] = useState(false)
-  const [formError, setFormError] = useState<string | null>(null)
+export interface BrokerConnection {
+  id: string
+  broker_name: 'upstox' | 'zerodha' | 'angel'
+  broker_user_id: string
+  is_active: boolean
+  is_verified: boolean
+  token_expires_at: string | null
+  last_verified_at: string | null
+  created_at: string
+  updated_at: string
+}
 
-  const handleSubmit = async (e: React.FormEvent) => {
-    e.preventDefault()
-    setFormLoading(true)
-    setFormError(null)
+export interface BrokerCredentials {
+  broker_name: 'upstox' | 'zerodha' | 'angel'
+  broker_user_id: string
+  api_key: string
+  api_secret: string
+}
+
+export function useBrokerConnection() {
+  const { user } = useAuth()
+  const [connections, setConnections] = useState<BrokerConnection[]>([])
+  const [loading, setLoading] = useState(false)
+  const [error, setError] = useState<string | null>(null)
+  const supabase = createClient()
+
+  // Fetch user's broker connections
+  const fetchConnections = async () => {
+    if (!user) return
+
+    setLoading(true)
+    try {
+      const { data, error } = await supabase
+        .from('broker_connections')
+        .select('*')
+        .eq('user_id', user.id)
+        .order('created_at', { ascending: false })
+
+      if (error) throw error
+      setConnections(data || [])
+    } catch (err: any) {
+      setError(err.message)
+    } finally {
+      setLoading(false)
+    }
+  }
+
+  // Add new broker connection
+  const addBrokerConnection = async (credentials: BrokerCredentials) => {
+    if (!user) throw new Error('User not authenticated')
+
+    setLoading(true)
+    setError(null)
 
     try {
-      await addBrokerConnection(formData)
-      setIsDialogOpen(false)
-      setFormData({
-        broker_name: 'upstox',
-        broker_user_id: '',
-        api_key: '',
-        api_secret: '',
-      })
-    } catch (err: any) {
-      setFormError(err.message)
-    } finally {
-      setFormLoading(false)
-    }
-  }
-
-  const getStatusBadge = (connection: any) => {
-    if (!connection.is_active) {
-      return <Badge variant="destructive" className="flex items-center gap-1">
-        <AlertCircle className="h-3 w-3" />
-        Inactive
-      </Badge>
-    }
-
-    if (connection.is_verified) {
-      const expiry = connection.token_expires_at ? new Date(connection.token_expires_at) : null
-      const now = new Date()
-      const isExpiringSoon = expiry && (expiry.getTime() - now.getTime()) < 2 * 60 * 60 * 1000 // 2 hours
-
-      if (isExpiringSoon) {
-        return <Badge variant="outline" className="flex items-center gap-1 text-orange-600">
-          <Clock className="h-3 w-3" />
-          Expires Soon
-        </Badge>
+      // Skip validation for development - Direct save to database
+      console.log('Adding broker connection:', credentials.broker_name)
+      
+      // Encrypt sensitive data (in real app, do this on server-side)
+      const encryptedData = {
+        api_secret_encrypted: btoa(credentials.api_secret), // Simple base64 - use proper encryption in production
+        access_token_encrypted: null,
+        refresh_token_encrypted: null,
       }
 
-      return <Badge variant="default" className="flex items-center gap-1 bg-green-600">
-        <CheckCircle className="h-3 w-3" />
-        Connected
-      </Badge>
+      const { data, error } = await supabase
+        .from('broker_connections')
+        .insert({
+          user_id: user.id,
+          broker_name: credentials.broker_name,
+          broker_user_id: credentials.broker_user_id,
+          api_key: credentials.api_key,
+          ...encryptedData,
+          is_active: false, // Will be activated after OAuth
+          is_verified: false, // Will be verified after OAuth
+          last_verified_at: null,
+        })
+        .select()
+        .single()
+
+      if (error) throw error
+
+      // Update user profile
+      await supabase
+        .from('profiles')
+        .update({ 
+          broker_connected: false, // Will be true after OAuth success
+          broker_connection_status: 'connecting'
+        })
+        .eq('id', user.id)
+
+      await fetchConnections()
+      return data
+    } catch (err: any) {
+      setError(err.message)
+      throw err
+    } finally {
+      setLoading(false)
     }
-
-    return <Badge variant="outline" className="flex items-center gap-1">
-      <Clock className="h-3 w-3" />
-      Verifying
-    </Badge>
   }
 
-  const formatExpiry = (expiryDate: string | null) => {
-    if (!expiryDate) return 'N/A'
-    const date = new Date(expiryDate)
-    const now = new Date()
-    const diffHours = Math.floor((date.getTime() - now.getTime()) / (1000 * 60 * 60))
-    
-    if (diffHours < 0) return 'Expired'
-    if (diffHours < 24) return `${diffHours}h remaining`
-    
-    return date.toLocaleDateString('en-IN', { 
-      day: 'numeric', 
-      month: 'short', 
-      hour: '2-digit', 
-      minute: '2-digit' 
-    })
-  }
-
-  return (
-    <Card>
-      <CardHeader>
-        <div className="flex items-center justify-between">
-          <div>
-            <CardTitle className="flex items-center gap-2">
-              <span>Broker Connections</span>
-              {connections.length > 0 && (
-                <Badge variant="outline">{connections.length}</Badge>
-              )}
-            </CardTitle>
-            <CardDescription>
-              Connect your broker accounts for live trading
-            </CardDescription>
-          </div>
-          
-          <Dialog open={isDialogOpen} onOpenChange={setIsDialogOpen}>
-            <DialogTrigger asChild>
-              <Button variant="outline" size="sm">
-                <Plus className="h-4 w-4 mr-2" />
-                Add Broker
-              </Button>
-            </DialogTrigger>
-            
-            <DialogContent>
-              <DialogHeader>
-                <DialogTitle>Add Broker Connection</DialogTitle>
-                <DialogDescription>
-                  Enter your broker API credentials. These will be stored securely.
-                </DialogDescription>
-              </DialogHeader>
-              
-              <form onSubmit={handleSubmit} className="space-y-4">
-                <div className="space-y-2">
-                  <Label htmlFor="broker">Broker</Label>
-                  <Select 
-                    value={formData.broker_name} 
-                    onValueChange={(value: any) => setFormData({...formData, broker_name: value})}
-                  >
-                    <SelectTrigger>
-                      <SelectValue placeholder="Select broker" />
-                    </SelectTrigger>
-                    <SelectContent>
-                      <SelectItem value="upstox">Upstox</SelectItem>
-                      <SelectItem value="zerodha">Zerodha</SelectItem>
-                      <SelectItem value="angel">Angel Broking</SelectItem>
-                    </SelectContent>
-                  </Select>
-                </div>
-
-                <div className="space-y-2">
-                  <Label htmlFor="user_id">Broker User ID</Label>
-                  <Input
-                    id="user_id"
-                    placeholder="Your broker user ID"
-                    value={formData.broker_user_id}
-                    onChange={(e) => setFormData({...formData, broker_user_id: e.target.value})}
-                    required
-                  />
-                </div>
-
-                <div className="space-y-2">
-                  <Label htmlFor="api_key">API Key</Label>
-                  <Input
-                    id="api_key"
-                    placeholder="Your API key"
-                    value={formData.api_key}
-                    onChange={(e) => setFormData({...formData, api_key: e.target.value})}
-                    required
-                  />
-                </div>
-
-                <div className="space-y-2">
-                  <Label htmlFor="api_secret">API Secret</Label>
-                  <Input
-                    id="api_secret"
-                    type="password"
-                    placeholder="Your API secret"
-                    value={formData.api_secret}
-                    onChange={(e) => setFormData({...formData, api_secret: e.target.value})}
-                    required
-                  />
-                </div>
-
-                {formError && (
-                  <Alert className="border-red-200 bg-red-50">
-                    <AlertCircle className="h-4 w-4" />
-                    <AlertDescription className="text-red-800">
-                      {formError}
-                    </AlertDescription>
-                  </Alert>
-                )}
-
-                <div className="flex gap-3 pt-4">
-                  <Button type="submit" disabled={formLoading} className="flex-1">
-                    {formLoading ? (
-                      <>
-                        <RefreshCw className="h-4 w-4 mr-2 animate-spin" />
-                        Verifying...
-                      </>
-                    ) : (
-                      'Connect Broker'
-                    )}
-                  </Button>
-                  <Button 
-                    type="button" 
-                    variant="outline" 
-                    onClick={() => setIsDialogOpen(false)}
-                  >
-                    Cancel
-                  </Button>
-                </div>
-              </form>
-            </DialogContent>
-          </Dialog>
-        </div>
-      </CardHeader>
+  // Validate broker credentials
+  const validateBrokerCredentials = async (credentials: BrokerCredentials): Promise<boolean> => {
+    try {
+      if (credentials.broker_name === 'upstox') {
+        // Import Upstox validation function
+        const { validateUpstoxCredentials } = await import('@/utils/upstox/api')
+        return await validateUpstoxCredentials({
+          api_key: credentials.api_key,
+          api_secret: credentials.api_secret,
+          broker_user_id: credentials.broker_user_id
+        })
+      }
       
-      <CardContent>
-        {error && (
-          <Alert className="mb-4 border-red-200 bg-red-50">
-            <AlertCircle className="h-4 w-4" />
-            <AlertDescription className="text-red-800">
-              {error}
-            </AlertDescription>
-          </Alert>
-        )}
+      // Add other broker validations here
+      return false
+    } catch (error) {
+      console.error('Validation error:', error)
+      return false
+    }
+  }
 
-        {loading ? (
-          <div className="flex items-center justify-center py-8">
-            <RefreshCw className="h-6 w-6 animate-spin mr-2" />
-            Loading connections...
-          </div>
-        ) : connections.length === 0 ? (
-          <div className="text-center py-8 text-muted-foreground">
-            <div className="text-4xl mb-2">🔗</div>
-            <p className="text-sm">No broker connections yet</p>
-            <p className="text-xs">Add a broker to start trading</p>
-          </div>
-        ) : (
-          <div className="space-y-3">
-            {connections.map((connection) => (
-              <div
-                key={connection.id}
-                className="flex items-center justify-between p-4 border border-border rounded-lg"
-              >
-                <div className="flex-1">
-                  <div className="flex items-center gap-3 mb-2">
-                    <div className="font-medium capitalize">{connection.broker_name}</div>
-                    {getStatusBadge(connection)}
-                  </div>
-                  
-                  <div className="text-sm text-muted-foreground space-y-1">
-                    <div>User ID: {connection.broker_user_id}</div>
-                    <div>Token expires: {formatExpiry(connection.token_expires_at)}</div>
-                  </div>
-                </div>
+  // Remove broker connection
+  const removeBrokerConnection = async (connectionId: string) => {
+    if (!user) return
 
-                <div className="flex items-center gap-2">
-                  <Button
-                    variant="outline"
-                    size="sm"
-                    onClick={() => refreshBrokerToken(connection.id)}
-                    disabled={loading}
-                  >
-                    <RefreshCw className="h-4 w-4" />
-                  </Button>
-                  
-                  <Button
-                    variant="outline"
-                    size="sm"
-                    onClick={() => removeBrokerConnection(connection.id)}
-                    disabled={loading}
-                    className="text-red-600 hover:text-red-700"
-                  >
-                    <Trash2 className="h-4 w-4" />
-                  </Button>
-                </div>
-              </div>
-            ))}
-          </div>
-        )}
-      </CardContent>
-    </Card>
-  )
+    setLoading(true)
+    try {
+      const { error } = await supabase
+        .from('broker_connections')
+        .delete()
+        .eq('id', connectionId)
+        .eq('user_id', user.id)
+
+      if (error) throw error
+
+      // Update user profile if no connections left
+      const remainingConnections = connections.filter(c => c.id !== connectionId)
+      if (remainingConnections.length === 0) {
+        await supabase
+          .from('profiles')
+          .update({ 
+            broker_connected: false,
+            broker_connection_status: 'disconnected'
+          })
+          .eq('id', user.id)
+      }
+
+      await fetchConnections()
+    } catch (err: any) {
+      setError(err.message)
+    } finally {
+      setLoading(false)
+    }
+  }
+
+  // Check token expiry and refresh if needed
+  const refreshTokenIfNeeded = async (connectionId: string) => {
+    const connection = connections.find(c => c.id === connectionId)
+    if (!connection || !connection.token_expires_at) return
+
+    const expiryTime = new Date(connection.token_expires_at)
+    const now = new Date()
+    const timeToExpiry = expiryTime.getTime() - now.getTime()
+
+    // Refresh if expires within 10 minutes
+    if (timeToExpiry < 10 * 60 * 1000) {
+      await refreshBrokerToken(connectionId)
+    }
+  }
+
+  // Refresh broker token
+  const refreshBrokerToken = async (connectionId: string) => {
+    setLoading(true)
+    try {
+      // Mock token refresh - implement actual broker API calls
+      const newTokenExpiry = new Date()
+      newTokenExpiry.setHours(newTokenExpiry.getHours() + 24) // 24 hours from now
+
+      const { error } = await supabase
+        .from('broker_connections')
+        .update({
+          token_expires_at: newTokenExpiry.toISOString(),
+          last_verified_at: new Date().toISOString(),
+          is_active: true,
+          updated_at: new Date().toISOString()
+        })
+        .eq('id', connectionId)
+        .eq('user_id', user?.id)
+
+      if (error) throw error
+      await fetchConnections()
+    } catch (err: any) {
+      setError(err.message)
+    } finally {
+      setLoading(false)
+    }
+  }
+
+  // Auto-fetch connections when user changes
+  useEffect(() => {
+    if (user) {
+      fetchConnections()
+    } else {
+      setConnections([])
+    }
+  }, [user])
+
+  return {
+    connections,
+    loading,
+    error,
+    addBrokerConnection,
+    removeBrokerConnection,
+    refreshTokenIfNeeded,
+    refreshBrokerToken,
+    fetchConnections,
+    user, // Export user as well
+  }
 }

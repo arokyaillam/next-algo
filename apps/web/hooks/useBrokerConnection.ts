@@ -60,12 +60,9 @@ export function useBrokerConnection() {
     setError(null)
 
     try {
-      // First, validate credentials with broker API
-      const isValid = await validateBrokerCredentials(credentials)
-      if (!isValid) {
-        throw new Error('Invalid broker credentials')
-      }
-
+      // Skip validation for development - Direct save to database
+      console.log('Adding broker connection:', credentials.broker_name)
+      
       // Encrypt sensitive data (in real app, do this on server-side)
       const encryptedData = {
         api_secret_encrypted: btoa(credentials.api_secret), // Simple base64 - use proper encryption in production
@@ -81,9 +78,9 @@ export function useBrokerConnection() {
           broker_user_id: credentials.broker_user_id,
           api_key: credentials.api_key,
           ...encryptedData,
-          is_active: true,
-          is_verified: true,
-          last_verified_at: new Date().toISOString(),
+          is_active: false, // Will be activated after OAuth
+          is_verified: false, // Will be verified after OAuth
+          last_verified_at: null,
         })
         .select()
         .single()
@@ -94,8 +91,8 @@ export function useBrokerConnection() {
       await supabase
         .from('profiles')
         .update({ 
-          broker_connected: true,
-          broker_connection_status: 'connected'
+          broker_connected: false, // Will be true after OAuth success
+          broker_connection_status: 'connecting'
         })
         .eq('id', user.id)
 
@@ -111,14 +108,23 @@ export function useBrokerConnection() {
 
   // Validate broker credentials
   const validateBrokerCredentials = async (credentials: BrokerCredentials): Promise<boolean> => {
-    // Mock validation - replace with actual broker API calls
-    return new Promise((resolve) => {
-      setTimeout(() => {
-        // Simulate validation
-        const isValid = credentials.api_key.length > 10 && credentials.api_secret.length > 10
-        resolve(isValid)
-      }, 1000)
-    })
+    try {
+      if (credentials.broker_name === 'upstox') {
+        // Import Upstox validation function
+        const { validateUpstoxCredentials } = await import('@/utils/upstox/api')
+        return await validateUpstoxCredentials({
+          api_key: credentials.api_key,
+          api_secret: credentials.api_secret,
+          broker_user_id: credentials.broker_user_id
+        })
+      }
+      
+      // Add other broker validations here
+      return false
+    } catch (error) {
+      console.error('Validation error:', error)
+      return false
+    }
   }
 
   // Remove broker connection
