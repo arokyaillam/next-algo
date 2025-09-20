@@ -1,227 +1,230 @@
-// hooks/useBrokerConnection.ts
 'use client'
 
-import { useState, useEffect } from 'react'
-import { createClient } from '@/utils/supabase/client'
-import { useAuth } from '@/components/AuthProvider'
+import { useState } from 'react'
+import { useBrokerConnection, BrokerCredentials, BrokerConnection } from '@/hooks/useBrokerConnection'
+import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@workspace/ui/components/card"
+import { Button } from "@workspace/ui/components/button"
+import { Badge } from "@workspace/ui/components/badge"
+import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle, DialogTrigger } from "@workspace/ui/components/dialog"
+import { Input } from "@workspace/ui/components/input"
+import { Label } from "@workspace/ui/components/label"
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@workspace/ui/components/select"
+import { Alert, AlertDescription } from "@workspace/ui/components/alert"
+import { Loader2, Plus, Trash2, RefreshCw, AlertCircle, CheckCircle, Clock } from "lucide-react"
 
-export interface BrokerConnection {
-  id: string
-  broker_name: 'upstox' | 'zerodha' | 'angel'
-  broker_user_id: string
-  is_active: boolean
-  is_verified: boolean
-  token_expires_at: string | null
-  last_verified_at: string | null
-  created_at: string
-  updated_at: string
-}
+// BrokerConnectionCard Component
+export function BrokerConnectionCard() {
+  const { connections, loading, error, addBrokerConnection, removeBrokerConnection, refreshBrokerToken } = useBrokerConnection()
+  const [isAddDialogOpen, setIsAddDialogOpen] = useState(false)
+  const [actionError, setActionError] = useState<string | null>(null)
+  const [newConnection, setNewConnection] = useState({
+    broker_name: 'upstox' as 'upstox' | 'zerodha' | 'angel',
+    broker_user_id: '',
+    api_key: '',
+    api_secret: '',
+  })
 
-export interface BrokerCredentials {
-  broker_name: 'upstox' | 'zerodha' | 'angel'
-  broker_user_id: string
-  api_key: string
-  api_secret: string
-}
-
-export function useBrokerConnection() {
-  const { user } = useAuth()
-  const [connections, setConnections] = useState<BrokerConnection[]>([])
-  const [loading, setLoading] = useState(false)
-  const [error, setError] = useState<string | null>(null)
-  const supabase = createClient()
-
-  // Fetch user's broker connections
-  const fetchConnections = async () => {
-    if (!user) return
-
-    setLoading(true)
+  const handleAddConnection = async () => {
+    setActionError(null)
     try {
-      const { data, error } = await supabase
-        .from('broker_connections')
-        .select('*')
-        .eq('user_id', user.id)
-        .order('created_at', { ascending: false })
+      await addBrokerConnection(newConnection)
+      setIsAddDialogOpen(false)
+      setNewConnection({
+        broker_name: 'upstox',
+        broker_user_id: '',
+        api_key: '',
+        api_secret: '',
+      })
+    } catch (err) {
+      console.error('Failed to add connection:', err)
+    }
+  }
 
-      if (error) throw error
-      setConnections(data || [])
+  const handleRemoveConnection = async (connectionId: string) => {
+    setActionError(null)
+    try {
+      await removeBrokerConnection(connectionId)
     } catch (err: any) {
-      setError(err.message)
-    } finally {
-      setLoading(false)
+      console.error('Failed to remove connection:', err)
+      setActionError(err.message || 'Failed to remove connection. Please try again.')
     }
   }
 
-  // Add new broker connection
-  const addBrokerConnection = async (credentials: BrokerCredentials) => {
-    if (!user) throw new Error('User not authenticated')
-
-    setLoading(true)
-    setError(null)
-
+  const handleRefreshToken = async (connectionId: string) => {
     try {
-      // Skip validation for development - Direct save to database
-      console.log('Adding broker connection:', credentials.broker_name)
-      
-      // Encrypt sensitive data (in real app, do this on server-side)
-      const encryptedData = {
-        api_secret_encrypted: btoa(credentials.api_secret), // Simple base64 - use proper encryption in production
-        access_token_encrypted: null,
-        refresh_token_encrypted: null,
-      }
-
-      const { data, error } = await supabase
-        .from('broker_connections')
-        .insert({
-          user_id: user.id,
-          broker_name: credentials.broker_name,
-          broker_user_id: credentials.broker_user_id,
-          api_key: credentials.api_key,
-          ...encryptedData,
-          is_active: false, // Will be activated after OAuth
-          is_verified: false, // Will be verified after OAuth
-          last_verified_at: null,
-        })
-        .select()
-        .single()
-
-      if (error) throw error
-
-      // Update user profile
-      await supabase
-        .from('profiles')
-        .update({ 
-          broker_connected: false, // Will be true after OAuth success
-          broker_connection_status: 'connecting'
-        })
-        .eq('id', user.id)
-
-      await fetchConnections()
-      return data
-    } catch (err: any) {
-      setError(err.message)
-      throw err
-    } finally {
-      setLoading(false)
-    }
-  }
-
-  // Validate broker credentials
-  const validateBrokerCredentials = async (credentials: BrokerCredentials): Promise<boolean> => {
-    try {
-      if (credentials.broker_name === 'upstox') {
-        // Import Upstox validation function
-        const { validateUpstoxCredentials } = await import('@/utils/upstox/api')
-        return await validateUpstoxCredentials({
-          api_key: credentials.api_key,
-          api_secret: credentials.api_secret,
-          broker_user_id: credentials.broker_user_id
-        })
-      }
-      
-      // Add other broker validations here
-      return false
-    } catch (error) {
-      console.error('Validation error:', error)
-      return false
-    }
-  }
-
-  // Remove broker connection
-  const removeBrokerConnection = async (connectionId: string) => {
-    if (!user) return
-
-    setLoading(true)
-    try {
-      const { error } = await supabase
-        .from('broker_connections')
-        .delete()
-        .eq('id', connectionId)
-        .eq('user_id', user.id)
-
-      if (error) throw error
-
-      // Update user profile if no connections left
-      const remainingConnections = connections.filter(c => c.id !== connectionId)
-      if (remainingConnections.length === 0) {
-        await supabase
-          .from('profiles')
-          .update({ 
-            broker_connected: false,
-            broker_connection_status: 'disconnected'
-          })
-          .eq('id', user.id)
-      }
-
-      await fetchConnections()
-    } catch (err: any) {
-      setError(err.message)
-    } finally {
-      setLoading(false)
-    }
-  }
-
-  // Check token expiry and refresh if needed
-  const refreshTokenIfNeeded = async (connectionId: string) => {
-    const connection = connections.find(c => c.id === connectionId)
-    if (!connection || !connection.token_expires_at) return
-
-    const expiryTime = new Date(connection.token_expires_at)
-    const now = new Date()
-    const timeToExpiry = expiryTime.getTime() - now.getTime()
-
-    // Refresh if expires within 10 minutes
-    if (timeToExpiry < 10 * 60 * 1000) {
       await refreshBrokerToken(connectionId)
+    } catch (err) {
+      console.error('Failed to refresh token:', err)
     }
   }
 
-  // Refresh broker token
-  const refreshBrokerToken = async (connectionId: string) => {
-    setLoading(true)
-    try {
-      // Mock token refresh - implement actual broker API calls
-      const newTokenExpiry = new Date()
-      newTokenExpiry.setHours(newTokenExpiry.getHours() + 24) // 24 hours from now
-
-      const { error } = await supabase
-        .from('broker_connections')
-        .update({
-          token_expires_at: newTokenExpiry.toISOString(),
-          last_verified_at: new Date().toISOString(),
-          is_active: true,
-          updated_at: new Date().toISOString()
-        })
-        .eq('id', connectionId)
-        .eq('user_id', user?.id)
-
-      if (error) throw error
-      await fetchConnections()
-    } catch (err: any) {
-      setError(err.message)
-    } finally {
-      setLoading(false)
+  const getBrokerDisplayName = (brokerName: string) => {
+    switch (brokerName) {
+      case 'upstox': return 'Upstox'
+      case 'zerodha': return 'Zerodha'
+      case 'angel': return 'Angel One'
+      default: return brokerName
     }
   }
 
-  // Auto-fetch connections when user changes
-  useEffect(() => {
-    if (user) {
-      fetchConnections()
+  const getStatusBadge = (connection: BrokerConnection) => {
+    if (connection.is_verified && connection.is_active) {
+      return <Badge className="bg-green-100 text-green-800">Active</Badge>
+    } else if (connection.is_verified) {
+      return <Badge className="bg-yellow-100 text-yellow-800">Verified</Badge>
     } else {
-      setConnections([])
+      return <Badge className="bg-red-100 text-red-800">Not Verified</Badge>
     }
-  }, [user])
-
-  return {
-    connections,
-    loading,
-    error,
-    addBrokerConnection,
-    removeBrokerConnection,
-    refreshTokenIfNeeded,
-    refreshBrokerToken,
-    fetchConnections,
-    user, // Export user as well
   }
+
+  return (
+    <div className="space-y-6">
+      {/* Existing Connections */}
+      <Card>
+        <CardHeader className="flex flex-row items-center justify-between">
+          <div>
+            <CardTitle>Broker Connections</CardTitle>
+            <CardDescription>
+              Manage your broker API connections for automated trading
+            </CardDescription>
+          </div>
+          <Dialog open={isAddDialogOpen} onOpenChange={setIsAddDialogOpen}>
+            <DialogTrigger asChild>
+              <Button>
+                <Plus className="mr-2 h-4 w-4" />
+                Add Connection
+              </Button>
+            </DialogTrigger>
+            <DialogContent>
+              <DialogHeader>
+                <DialogTitle>Add Broker Connection</DialogTitle>
+                <DialogDescription>
+                  Connect your trading account to enable automated trading
+                </DialogDescription>
+              </DialogHeader>
+              <div className="space-y-4">
+                <div>
+                  <Label htmlFor="broker">Broker</Label>
+                  <Select
+                    value={newConnection.broker_name}
+                    onValueChange={(value) => setNewConnection(prev => ({ ...prev, broker_name: value as 'upstox' | 'zerodha' | 'angel' }))}
+                  >
+                    <SelectTrigger>
+                      <SelectValue placeholder="Select broker" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="upstox">Upstox</SelectItem>
+                      <SelectItem value="zerodha">Zerodha</SelectItem>
+                      <SelectItem value="angel">Angel One</SelectItem>
+                    </SelectContent>
+                  </Select>
+                </div>
+                <div>
+                  <Label htmlFor="user_id">Broker User ID</Label>
+                  <Input
+                    id="user_id"
+                    value={newConnection.broker_user_id}
+                    onChange={(e) => setNewConnection(prev => ({ ...prev, broker_user_id: e.target.value }))}
+                    placeholder="Enter your broker user ID"
+                  />
+                </div>
+                <div>
+                  <Label htmlFor="api_key">API Key</Label>
+                  <Input
+                    id="api_key"
+                    type="password"
+                    value={newConnection.api_key}
+                    onChange={(e) => setNewConnection(prev => ({ ...prev, api_key: e.target.value }))}
+                    placeholder="Enter your API key"
+                  />
+                </div>
+                <div>
+                  <Label htmlFor="api_secret">API Secret</Label>
+                  <Input
+                    id="api_secret"
+                    type="password"
+                    value={newConnection.api_secret}
+                    onChange={(e) => setNewConnection(prev => ({ ...prev, api_secret: e.target.value }))}
+                    placeholder="Enter your API secret"
+                  />
+                </div>
+                <div className="flex justify-end space-x-2">
+                  <Button variant="outline" onClick={() => setIsAddDialogOpen(false)}>
+                    Cancel
+                  </Button>
+                  <Button onClick={handleAddConnection} disabled={loading}>
+                    {loading && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
+                    Add Connection
+                  </Button>
+                </div>
+              </div>
+            </DialogContent>
+          </Dialog>
+        </CardHeader>
+        <CardContent>
+          {error && (
+            <div className="mb-4 p-4 bg-red-50 border border-red-200 rounded-md">
+              <p className="text-red-800 text-sm">{error}</p>
+            </div>
+          )}
+
+          {actionError && (
+            <div className="mb-4 p-4 bg-red-50 border border-red-200 rounded-md">
+              <p className="text-red-800 text-sm">{actionError}</p>
+            </div>
+          )}
+
+          {loading && connections.length === 0 ? (
+            <div className="text-center py-8">
+              <Loader2 className="mx-auto h-8 w-8 animate-spin text-muted-foreground" />
+              <p className="mt-2 text-sm text-muted-foreground">Loading connections...</p>
+            </div>
+          ) : connections.length === 0 ? (
+            <div className="text-center py-8 text-muted-foreground">
+              <div className="text-4xl mb-2">🔗</div>
+              <p className="text-sm">No broker connections yet</p>
+              <p className="text-xs mt-1">Add a connection to start automated trading</p>
+            </div>
+          ) : (
+            <div className="space-y-4">
+              {connections.map((connection) => (
+                <div key={connection.id} className="flex items-center justify-between p-4 border rounded-lg">
+                  <div className="flex items-center space-x-4">
+                    <div>
+                      <div className="font-medium">{getBrokerDisplayName(connection.broker_name)}</div>
+                      <div className="text-sm text-muted-foreground">ID: {connection.broker_user_id}</div>
+                      {connection.last_verified_at && (
+                        <div className="text-xs text-muted-foreground">
+                          Last verified: {new Date(connection.last_verified_at).toLocaleDateString()}
+                        </div>
+                      )}
+                    </div>
+                  </div>
+                  <div className="flex items-center space-x-2">
+                    {getStatusBadge(connection)}
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      onClick={() => handleRefreshToken(connection.id)}
+                      disabled={loading}
+                    >
+                      <RefreshCw className="h-4 w-4" />
+                    </Button>
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      onClick={() => handleRemoveConnection(connection.id)}
+                      disabled={loading}
+                    >
+                      <Trash2 className="h-4 w-4" />
+                    </Button>
+                  </div>
+                </div>
+              ))}
+            </div>
+          )}
+        </CardContent>
+      </Card>
+    </div>
+  )
 }

@@ -10,6 +10,15 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@work
 import { Alert, AlertDescription } from "@workspace/ui/components/alert"
 import { CheckCircle, AlertCircle, RefreshCw } from 'lucide-react'
 
+// Calculate Upstox token expiry (3:30 AM next day)
+function calculateUpstoxTokenExpiry(): string {
+  const now = new Date()
+  const tomorrow = new Date(now)
+  tomorrow.setDate(tomorrow.getDate() + 1)
+  tomorrow.setHours(3, 30, 0, 0) // 3:30 AM next day
+  return tomorrow.toISOString()
+}
+
 export default function UpstoxCallbackPage() {
   const router = useRouter()
   const searchParams = useSearchParams()
@@ -28,17 +37,29 @@ export default function UpstoxCallbackPage() {
         const code = searchParams.get('code')
         const state = searchParams.get('state')
         const error = searchParams.get('error')
+        const errorDescription = searchParams.get('error_description')
+
+        console.log('OAuth callback parameters:', {
+          hasCode: !!code,
+          hasState: !!state,
+          hasError: !!error,
+          errorDescription
+        })
 
         if (error) {
-          throw new Error(`Upstox OAuth error: ${error}`)
+          throw new Error(`Upstox OAuth error: ${error}${errorDescription ? ` - ${errorDescription}` : ''}`)
         }
 
         if (!code) {
-          throw new Error('No authorization code received')
+          throw new Error('No authorization code received from Upstox')
+        }
+
+        if (!state) {
+          throw new Error('No state parameter received')
         }
 
         if (state !== user.id) {
-          throw new Error('Invalid state parameter')
+          throw new Error('Invalid state parameter - possible security issue')
         }
 
         setMessage('Exchanging authorization code for access token...')
@@ -56,6 +77,10 @@ export default function UpstoxCallbackPage() {
         }
 
         // Decrypt API credentials (implement proper decryption)
+        if (!brokerConnection.api_secret_encrypted) {
+          throw new Error('API secret not found in database')
+        }
+
         const credentials = {
           api_key: brokerConnection.api_key,
           api_secret: atob(brokerConnection.api_secret_encrypted), // Simple base64 decode
@@ -69,25 +94,51 @@ export default function UpstoxCallbackPage() {
           `${window.location.origin}/auth/upstox/callback`
         )
 
+        // Validate token response
+        if (!tokenResponse.access_token) {
+          throw new Error('No access token received from Upstox')
+        }
+
+        console.log('Token response received:', {
+          hasAccessToken: !!tokenResponse.access_token,
+          hasExtendedToken: !!tokenResponse.extended_token,
+          userName: tokenResponse.user_name,
+          userId: tokenResponse.user_id,
+          isActive: tokenResponse.is_active
+        })
+
         setMessage('Validating connection with Upstox...')
 
-        // Get user profile to validate connection
-        const userProfile = await getUpstoxUserProfile(tokenResponse.access_token)
+        // User profile is already included in token response
+        console.log('User profile from token response:', {
+          userName: tokenResponse.user_name,
+          userId: tokenResponse.user_id,
+          email: tokenResponse.email,
+          isActive: tokenResponse.is_active
+        })
+
+        // Use profile data from token response
+        const userProfile = {
+          data: {
+            user_name: tokenResponse.user_name,
+            user_id: tokenResponse.user_id,
+            email: tokenResponse.email
+          }
+        }
 
         setMessage('Saving authentication tokens...')
 
-        // Calculate token expiry
-        const expiryTime = new Date()
-        expiryTime.setSeconds(expiryTime.getSeconds() + tokenResponse.expires_in)
+        // Calculate token expiry (Upstox tokens expire at 3:30 AM next day)
+        const expiryTime = calculateUpstoxTokenExpiry()
+        console.log('Token expiry calculated:', expiryTime)
 
         // Update database with tokens
         const { error: updateError } = await supabase
           .from('broker_connections')
           .update({
             access_token_encrypted: btoa(tokenResponse.access_token), // Simple base64 encode
-            refresh_token_encrypted: tokenResponse.refresh_token ? btoa(tokenResponse.refresh_token) : null,
-            token_expires_at: expiryTime.toISOString(),
-            token_created_at: new Date().toISOString(),
+            refresh_token_encrypted: tokenResponse.extended_token ? btoa(tokenResponse.extended_token) : null, // Use extended_token as refresh_token
+            token_expires_at: expiryTime,
             is_active: true,
             is_verified: true,
             last_verified_at: new Date().toISOString(),
