@@ -10,11 +10,20 @@ import { Input } from "@workspace/ui/components/input"
 import { Label } from "@workspace/ui/components/label"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@workspace/ui/components/select"
 import { Alert, AlertDescription } from "@workspace/ui/components/alert"
-import { Loader2, Plus, Trash2, RefreshCw, AlertCircle, CheckCircle, Clock } from "lucide-react"
+import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@workspace/ui/components/tooltip"
+import { Loader2, Plus, Trash2, RefreshCw, AlertCircle, CheckCircle, Clock, KeyRound } from "lucide-react"
 
 // BrokerConnectionCard Component
 export function BrokerConnectionCard() {
-  const { connections, loading, error, addBrokerConnection, removeBrokerConnection, refreshBrokerToken } = useBrokerConnection()
+  const { 
+    connections, 
+    loading, 
+    error, 
+    addBrokerConnection, 
+    removeBrokerConnection, 
+    refreshBrokerToken,
+    reauthorizeBrokerConnection
+  } = useBrokerConnection()
   const [isAddDialogOpen, setIsAddDialogOpen] = useState(false)
   const [actionError, setActionError] = useState<string | null>(null)
   const [newConnection, setNewConnection] = useState({
@@ -55,6 +64,16 @@ export function BrokerConnectionCard() {
       await refreshBrokerToken(connectionId)
     } catch (err) {
       console.error('Failed to refresh token:', err)
+    }
+  }
+  
+  const handleReauthorize = async (connectionId: string) => {
+    setActionError(null)
+    try {
+      await reauthorizeBrokerConnection(connectionId)
+    } catch (err: any) {
+      console.error('Failed to reauthorize connection:', err)
+      setActionError(err.message || 'Failed to reauthorize connection. Please try again.')
     }
   }
 
@@ -173,6 +192,15 @@ export function BrokerConnectionCard() {
               <p className="text-red-800 text-sm">{actionError}</p>
             </div>
           )}
+          
+          {connections.some(c => !c.is_active || !c.is_verified) && (
+            <Alert className="mb-4 bg-amber-50 border-amber-200">
+              <AlertCircle className="h-4 w-4 text-amber-600" />
+              <AlertDescription className="text-amber-800">
+                One or more of your broker connections needs to be reauthorized. Click the <KeyRound className="h-3 w-3 inline" /> button to reconnect.
+              </AlertDescription>
+            </Alert>
+          )}
 
           {loading && connections.length === 0 ? (
             <div className="text-center py-8">
@@ -207,14 +235,33 @@ export function BrokerConnectionCard() {
                       size="sm"
                       onClick={() => handleRefreshToken(connection.id)}
                       disabled={loading}
+                      title="Refresh token"
                     >
                       <RefreshCw className="h-4 w-4" />
                     </Button>
+                    <TooltipProvider>
+                      <Tooltip>
+                        <TooltipTrigger asChild>
+                          <Button
+                            variant="outline"
+                            size="sm"
+                            onClick={() => handleReauthorize(connection.id)}
+                            disabled={loading}
+                          >
+                            <KeyRound className="h-4 w-4" />
+                          </Button>
+                        </TooltipTrigger>
+                        <TooltipContent>
+                          <p>Re-authorize Upstox connection</p>
+                        </TooltipContent>
+                      </Tooltip>
+                    </TooltipProvider>
                     <Button
                       variant="outline"
                       size="sm"
                       onClick={() => handleRemoveConnection(connection.id)}
                       disabled={loading}
+                      title="Remove connection"
                     >
                       <Trash2 className="h-4 w-4" />
                     </Button>

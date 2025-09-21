@@ -46,6 +46,7 @@ export interface BrokerConnectionHookReturn {
   removeBrokerConnection: (connectionId: string) => Promise<void>
   refreshTokenIfNeeded: (connectionId: string) => Promise<void>
   refreshBrokerToken: (connectionId: string) => Promise<void>
+  reauthorizeBrokerConnection: (connectionId: string) => Promise<void>
   testBrokerConnection: (connectionId: string) => Promise<boolean>
   fetchConnections: () => Promise<void>
 }
@@ -363,6 +364,71 @@ export function useBrokerConnection(): BrokerConnectionHookReturn {
     }
   }
 
+  // Reauthorize broker connection (start OAuth flow again)
+  const reauthorizeBrokerConnection = async (connectionId: string) => {
+    setLoading(true)
+    setError(null)
+    try {
+      const connection = connections.find(c => c.id === connectionId)
+      if (!connection) {
+        throw new Error('Broker connection not found')
+      }
+
+      if (!connection.api_secret_encrypted) {
+        throw new Error('API secret not found. Please remove and add the connection again.')
+      }
+
+      if (connection.broker_name === 'upstox') {
+        // Import Upstox OAuth function
+        const { generateUpstoxAuthUrl } = await import('@/utils/upstox/api')
+
+        const redirectUri = `${window.location.origin}/auth/upstox/callback`
+        const state = user!.id // Use user ID as state for security
+
+        // Decrypt API secret
+        const credentials = {
+          api_key: connection.api_key,
+          api_secret: atob(connection.api_secret_encrypted),
+          broker_user_id: connection.broker_user_id
+        }
+
+        const authUrl = generateUpstoxAuthUrl(credentials, redirectUri, state)
+
+        console.log('Redirecting to Upstox OAuth for reauthorization:', authUrl)
+
+        // Update connection status
+        await supabase
+          .from('broker_connections')
+          .update({
+            is_active: false,
+            is_verified: false,
+            updated_at: new Date().toISOString()
+          })
+          .eq('id', connectionId)
+          .eq('user_id', user?.id)
+
+        // Update user profile
+        await supabase
+          .from('profiles')
+          .update({
+            broker_connected: false,
+            broker_connection_status: 'reconnecting'
+          })
+          .eq('id', user!.id)
+
+        // Redirect to Upstox OAuth page
+        window.location.href = authUrl
+      } else {
+        throw new Error(`Reauthorization not implemented for broker: ${connection.broker_name}`)
+      }
+    } catch (err: any) {
+      console.error('Failed to reauthorize connection:', err)
+      setError(err.message || 'Failed to reauthorize connection')
+    } finally {
+      setLoading(false)
+    }
+  }
+
   return {
     connections,
     loading,
@@ -372,6 +438,7 @@ export function useBrokerConnection(): BrokerConnectionHookReturn {
     removeBrokerConnection,
     refreshTokenIfNeeded,
     refreshBrokerToken,
+    reauthorizeBrokerConnection,
     testBrokerConnection,
     fetchConnections,
   }
