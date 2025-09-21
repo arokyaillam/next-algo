@@ -1,0 +1,26 @@
+{
+  "name": "market-data",
+  "version": "1.0.0",
+  "description": "",
+  "main": "index.js",
+  "scripts": {
+    "test": "echo \"Error: no test specified\" && exit 1"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "packageManager": "pnpm@10.4.1",
+  "dependencies": {
+    "@supabase/supabase-js": "^2.57.4",
+    "@tanstack/react-query": "^5.89.0",
+    "date-fns": "^4.1.0",
+    "lodash-es": "^4.17.21",
+    "upstox-js-sdk": "^2.19.0",
+    "zod": "^3.25.76",
+    "zustand": "^5.0.8",
+    "react": "^19.1.1"
+  },
+  "devDependencies": {
+    "@types/react": "^19.1.9"
+  }
+}
