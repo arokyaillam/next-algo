@@ -1,11 +1,10 @@
 // packages/market-data/src/stores/marketStore.ts
 import { create } from 'zustand';
 import { subscribeWithSelector } from 'zustand/middleware';
-import type { 
-  LiveMarketData, 
-  OptionChainData, 
-  BrokerConnection, 
-  NiftyOptionContract 
+import type {
+  LiveMarketData,
+  OptionChainData,
+  BrokerConnection
 } from '../types';
 import { UpstoxMarketDataService } from '../services/upstoxService';
 
@@ -123,7 +122,6 @@ export const useMarketStore = create<MarketState & MarketActions>()(
           const customEvent = event as CustomEvent<Partial<LiveMarketData>>;
           get().updateMarketData(customEvent.detail);
         };
-        // @ts-ignore: Custom event type
         window.addEventListener('marketData', marketDataHandler as EventListener);
         // Save handler for later removal
         (window as any)._marketDataHandler = marketDataHandler;
@@ -150,7 +148,6 @@ export const useMarketStore = create<MarketState & MarketActions>()(
       // Remove event listener using stored handler
       const handler = (window as any)._marketDataHandler;
       if (handler) {
-        // @ts-ignore: Custom event type
         window.removeEventListener('marketData', handler as EventListener);
         delete (window as any)._marketDataHandler;
       }

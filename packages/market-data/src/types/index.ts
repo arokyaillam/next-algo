@@ -106,6 +106,28 @@ export interface MarketDataSubscription {
 
 export interface WebSocketMessage {
   type: 'market_data' | 'order_update' | 'error';
-  data: any;
+  data: unknown;
   timestamp: Date;
 }
+
+// Additional types for exports
+export type MarketData = LiveMarketData
+
+export interface HistoricalData {
+  timestamp: Date
+  open: number
+  high: number
+  low: number
+  close: number
+  volume: number
+}
+
+export interface MarketStatus {
+  isOpen: boolean
+  message: string
+  nextOpenTime?: string
+  nextCloseTime?: string
+  currentTime: string
+}
+
+export type ConnectionStatus = 'disconnected' | 'connecting' | 'connected' | 'error' | 'reconnecting'

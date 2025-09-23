@@ -1,7 +1,7 @@
 // packages/market-data/src/services/upstoxService.ts
 
 import UpstoxClient from 'upstox-js-sdk';
-import type { BrokerConnection, LiveMarketData, WebSocketMessage } from '../types';
+import type { BrokerConnection, LiveMarketData } from '../types';
 
 // Define market data structure from Upstox
 export interface UpstoxMarketData {
@@ -50,10 +50,17 @@ interface UpstoxStreamer {
   changeMode(instrumentKeys: string[], mode: string): Promise<void>;
 }
 
+interface UpstoxPortfolioStreamer {
+  connect(): void;
+  disconnect(): void;
+  autoReconnect(enable: boolean, interval: number, retries: number): void;
+  on(event: string, callback: (data: any) => void): void;
+}
+
 export class UpstoxMarketDataService {
   private client!: UpstoxApiClient;
   private marketStreamer!: UpstoxStreamer;
-  private portfolioStreamer!: UpstoxStreamer;
+  private portfolioStreamer!: UpstoxPortfolioStreamer;
   private isConnected = false;
   private subscriptions = new Set<string>();
 
@@ -292,7 +299,7 @@ export class UpstoxMarketDataService {
     try {
       const optionsApi = new UpstoxClient.OptionsApi();
       const response = await optionsApi.getPutCallOptionChain(symbol, expiry);
-      return response.data;
+      return response.data as Record<string, any>;
     } catch (error) {
       console.error('Error fetching option chain:', error);
       throw error;
@@ -303,7 +310,7 @@ export class UpstoxMarketDataService {
     try {
       const marketQuoteApi = new UpstoxClient.MarketQuoteV3Api();
       const response = await marketQuoteApi.getLtp(instrumentKeys.join(','));
-      return response.data;
+      return response.data as Record<string, { ltp: number; volume: number; last_trade_time: string; }>;
     } catch (error) {
       console.error('Error fetching LTP:', error);
       throw error;
@@ -320,7 +327,7 @@ export class UpstoxMarketDataService {
     try {
       const marketQuoteApi = new UpstoxClient.MarketQuoteV3Api();
       const response = await marketQuoteApi.getMarketQuoteOptionGreek(instrumentKeys.join(','));
-      return response.data;
+      return response.data as Record<string, { delta: number; gamma: number; theta: number; vega: number; iv: number; }>;
     } catch (error) {
       console.error('Error fetching option Greeks:', error);
       throw error;
@@ -345,7 +352,7 @@ export class UpstoxMarketDataService {
         toDate,
         fromDate
       );
-      return response.data;
+      return response.data as { candles: [string, number, number, number, number, number][]; status: string; };
     } catch (error) {
       console.error('Error fetching historical data:', error);
       throw error;
@@ -373,3 +380,6 @@ export class UpstoxMarketDataService {
     return Array.from(this.subscriptions);
   }
 }
+
+// Export alias for backward compatibility
+export { UpstoxMarketDataService as UpstoxService }

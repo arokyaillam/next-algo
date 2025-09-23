@@ -1,7 +1,5 @@
 // packages/market-data/src/utils/index.ts
-import { format, isAfter, isBefore, parseISO } from 'date-fns';
-import { groupBy, sortBy } from 'lodash-es';
-import type { LiveMarketData, OptionData, NiftyOptionContract } from '../types';
+import type { LiveMarketData, OptionData } from '../types';
 
 // Option Chain Calculations
 export class OptionChainCalculator {

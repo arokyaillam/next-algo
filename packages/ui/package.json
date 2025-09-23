@@ -36,6 +36,7 @@
     "@workspace/eslint-config": "workspace:*",
     "@workspace/typescript-config": "workspace:*",
     "tailwindcss": "^4.1.11",
+    "tailwindcss-animate": "^1.0.7",
     "typescript": "^5.9.2"
   },
   "exports": {
