@@ -1,5 +1,6 @@
 // packages/market-data/src/services/upstoxService.ts
 
+// @ts-ignore: No type definitions available
 import UpstoxClient from 'upstox-js-sdk';
 import type { BrokerConnection, LiveMarketData } from '../types';
 
@@ -71,59 +72,38 @@ export class UpstoxMarketDataService {
   private initializeClient(): void {
     const defaultClient = UpstoxClient.ApiClient.instance;
     const OAUTH2 = defaultClient.authentications['OAUTH2'];
-    OAUTH2.accessToken = this.brokerConnection.accessToken;
-    this.client = defaultClient;
+
+    try {
+      OAUTH2.accessToken = this.getAccessToken();
+      this.client = defaultClient;
+      console.log('🔑 Upstox client initialized with access token');
+    } catch (error) {
+      console.error('❌ Failed to initialize Upstox client:', error);
+      throw error;
+    }
   }
 
-  // Market Data WebSocket Connection
+  // Market Data Connection (Browser-compatible using REST API polling)
   connectMarketData(): Promise<void> {
     return new Promise((resolve, reject) => {
       try {
-        // Initialize MarketDataStreamerV3
-        this.marketStreamer = new UpstoxClient.MarketDataStreamerV3();
+        // For browser compatibility, we'll use REST API polling instead of WebSocket
+        // The Upstox SDK WebSocket streamers use Node.js 'ws' library which doesn't work in browsers
 
-        // Configure auto-reconnect
-        this.marketStreamer.autoReconnect(true, 10, 5); // 10 sec interval, 5 retries
+        console.log('🌐 Browser environment detected - using REST API polling for market data');
 
-        // Event Listeners
-        this.marketStreamer.on('open', () => {
-          console.log('Upstox Market Data WebSocket Connected');
-          this.isConnected = true;
-          resolve();
-        });
-
-        this.marketStreamer.on('message', (data: Buffer) => {
-          try {
-            const feed = data.toString('utf-8');
-            const marketData = JSON.parse(feed) as UpstoxMarketData;
-            this.handleMarketData(marketData);
-          } catch (error) {
-            console.error('Error parsing market data:', error);
-          }
-        });
-
-        this.marketStreamer.on('error', (error: Error) => {
-          console.error('Market Data WebSocket Error:', error);
-          this.isConnected = false;
-          reject(error);
-        });
-
-        this.marketStreamer.on('close', () => {
-          console.log('Market Data WebSocket Disconnected');
-          this.isConnected = false;
-        });
-
-        this.marketStreamer.on('reconnecting', () => {
-          console.log('Market Data WebSocket Reconnecting...');
-        });
-
-        this.marketStreamer.on('autoReconnectStopped', (data: { reason: string; attempts: number }) => {
-          console.log('Auto-reconnect stopped:', data);
-          this.isConnected = false;
-        });
-
-        // Connect
-        this.marketStreamer.connect();
+        // Test connection with a simple API call
+        this.testConnection()
+          .then(() => {
+            this.isConnected = true;
+            console.log('✅ Upstox Market Data Connection established (REST API mode)');
+            resolve();
+          })
+          .catch((error) => {
+            console.error('❌ Upstox connection test failed:', error);
+            this.isConnected = false;
+            reject(error);
+          });
 
       } catch (error) {
         reject(error);
@@ -131,48 +111,65 @@ export class UpstoxMarketDataService {
     });
   }
 
-  // Portfolio WebSocket Connection
+  // Get decrypted access token
+  private getAccessToken(): string {
+    // Handle both direct accessToken and encrypted access_token_encrypted
+    if (this.brokerConnection.accessToken) {
+      return this.brokerConnection.accessToken;
+    }
+
+    // Handle encrypted token from database
+    if ((this.brokerConnection as any).access_token_encrypted) {
+      try {
+        return atob((this.brokerConnection as any).access_token_encrypted);
+      } catch (error) {
+        throw new Error('Failed to decrypt access token');
+      }
+    }
+
+    throw new Error('No access token available');
+  }
+
+  // Test connection using REST API
+  private async testConnection(): Promise<void> {
+    try {
+      const accessToken = this.getAccessToken();
+
+      console.log('🔑 Testing connection with access token:', accessToken.substring(0, 10) + '...');
+
+      // Test with a simple market data call
+      const response = await fetch(`https://api.upstox.com/v2/market-quote/ltp?instrument_key=NSE_INDEX|Nifty 50`, {
+        method: 'GET',
+        headers: {
+          'Authorization': `Bearer ${accessToken}`,
+          'Accept': 'application/json',
+        },
+      });
+
+      if (!response.ok) {
+        const errorText = await response.text();
+        console.error('❌ API Error Response:', response.status, errorText);
+        throw new Error(`API test failed: ${response.status} ${response.statusText}`);
+      }
+
+      const data = await response.json();
+      console.log('✅ Upstox API test successful:', data);
+    } catch (error) {
+      console.error('❌ Upstox API test failed:', error);
+      throw error;
+    }
+  }
+
+  // Portfolio Data Connection (Browser-compatible using REST API)
   connectPortfolioData(): Promise<void> {
     return new Promise((resolve, reject) => {
       try {
-        // Initialize PortfolioDataStreamer with all updates enabled
-        this.portfolioStreamer = new UpstoxClient.PortfolioDataStreamer(
-          true,  // orderUpdate
-          true,  // positionUpdate
-          true,  // holdingUpdate
-          true   // gttUpdate
-        );
+        // For browser compatibility, we'll use REST API calls instead of WebSocket
+        console.log('🌐 Browser environment detected - portfolio data will use REST API calls');
 
-        // Configure auto-reconnect
-        this.portfolioStreamer.autoReconnect(true, 10, 5);
-
-        // Event Listeners
-        this.portfolioStreamer.on('open', () => {
-          console.log('Upstox Portfolio WebSocket Connected');
-          resolve();
-        });
-
-        this.portfolioStreamer.on('message', (data: Buffer) => {
-          try {
-            const feed = data.toString('utf-8');
-            const portfolioData = JSON.parse(feed) as UpstoxPortfolioData;
-            this.handlePortfolioData(portfolioData);
-          } catch (error) {
-            console.error('Error parsing portfolio data:', error);
-          }
-        });
-
-        this.portfolioStreamer.on('error', (error: Error) => {
-          console.error('Portfolio WebSocket Error:', error);
-          reject(error);
-        });
-
-        this.portfolioStreamer.on('close', () => {
-          console.log('Portfolio WebSocket Disconnected');
-        });
-
-        // Connect
-        this.portfolioStreamer.connect();
+        // Portfolio data doesn't need persistent connection for testing
+        // We'll fetch it on-demand using REST API calls
+        resolve();
 
       } catch (error) {
         reject(error);
@@ -180,22 +177,131 @@ export class UpstoxMarketDataService {
     });
   }
 
-  // Subscribe to Nifty Options
+  // Subscribe to Nifty Options (Browser-compatible using REST API polling)
   async subscribeToNiftyOptions(instrumentKeys: string[], mode: 'ltpc' | 'full' | 'full_d30' | 'option_greeks' = 'full'): Promise<void> {
     if (!this.isConnected) {
       throw new Error('Market data connection not established');
     }
 
     try {
-      await this.marketStreamer.subscribe(instrumentKeys, mode);
-      
-      // Track subscriptions
+      // Debug: Check what we received
+      console.log('🔍 subscribeToNiftyOptions called with:', {
+        instrumentKeys,
+        type: typeof instrumentKeys,
+        isArray: Array.isArray(instrumentKeys),
+        length: instrumentKeys?.length
+      });
+
+      // Ensure instrumentKeys is an array
+      if (!Array.isArray(instrumentKeys)) {
+        throw new Error(`Expected instrumentKeys to be an array, got ${typeof instrumentKeys}`);
+      }
+
+      // Track subscriptions for REST API polling
       instrumentKeys.forEach(key => this.subscriptions.add(key));
-      
-      console.log(`Subscribed to ${instrumentKeys.length} instruments in ${mode} mode`);
+
+      console.log(`📊 Subscribed to ${instrumentKeys.length} instruments in ${mode} mode (REST API polling)`);
+
+      // Start polling for these instruments
+      this.startPolling(instrumentKeys, mode);
+
     } catch (error) {
       console.error('Error subscribing to instruments:', error);
       throw error;
+    }
+  }
+
+  // Start polling for market data (browser-compatible alternative to WebSocket)
+  private pollingInterval: NodeJS.Timeout | null = null;
+  private pollingInstruments: string[] = [];
+
+  private startPolling(instrumentKeys: string[], mode: string): void {
+    // Debug: Check what we received
+    console.log('🔍 startPolling called with:', {
+      instrumentKeys,
+      type: typeof instrumentKeys,
+      isArray: Array.isArray(instrumentKeys),
+      length: instrumentKeys?.length
+    });
+
+    // Ensure instrumentKeys is an array
+    if (!Array.isArray(instrumentKeys)) {
+      console.error('❌ startPolling: instrumentKeys is not an array:', instrumentKeys);
+      return;
+    }
+
+    // Store instruments for polling
+    this.pollingInstruments = [...new Set([...this.pollingInstruments, ...instrumentKeys])];
+
+    // Clear existing polling if any
+    if (this.pollingInterval) {
+      clearInterval(this.pollingInterval);
+    }
+
+    // Start polling every 2 seconds (to avoid rate limiting)
+    this.pollingInterval = setInterval(async () => {
+      try {
+        await this.pollMarketData();
+      } catch (error) {
+        console.error('Polling error:', error);
+      }
+    }, 2000);
+
+    console.log(`🔄 Started polling for ${this.pollingInstruments.length} instruments`);
+  }
+
+  // Poll market data using REST API
+  private async pollMarketData(): Promise<void> {
+    if (this.pollingInstruments.length === 0) return;
+
+    try {
+      const accessToken = this.getAccessToken();
+
+      // Upstox API supports multiple instruments in a single call
+      const instrumentKeys = this.pollingInstruments.join(',');
+
+      const response = await fetch(`https://api.upstox.com/v2/market-quote/ltp?instrument_key=${encodeURIComponent(instrumentKeys)}`, {
+        method: 'GET',
+        headers: {
+          'Authorization': `Bearer ${accessToken}`,
+          'Accept': 'application/json',
+        },
+      });
+
+      if (!response.ok) {
+        const errorText = await response.text();
+        console.error('❌ Polling Error Response:', response.status, errorText);
+        throw new Error(`Polling failed: ${response.status} ${response.statusText}`);
+      }
+
+      const data = await response.json();
+
+      // Process the data for each instrument
+      if (data.data) {
+        Object.entries(data.data).forEach(([instrumentKey, marketData]: [string, any]) => {
+          // Normalize instrument key: Upstox returns "NSE_INDEX:Nifty 50" but we use "NSE_INDEX|Nifty 50"
+          const normalizedKey = instrumentKey.replace(':', '|');
+
+          this.handleMarketData({
+            instrument_key: normalizedKey,
+            last_price: marketData.last_price,
+            volume: marketData.volume || 0,
+            net_change: marketData.net_change || 0,
+            percent_change: marketData.percent_change || 0,
+            timestamp: new Date().toISOString(),
+            ohlc: marketData.ohlc
+          });
+        });
+      }
+
+    } catch (error) {
+      console.error('Market data polling error:', error);
+
+      // If we get 401, the token might be expired
+      if (error instanceof Error && error.message.includes('401')) {
+        console.warn('🔑 Access token might be expired, marking connection as inactive');
+        this.isConnected = false;
+      }
     }
   }
 
@@ -226,25 +332,36 @@ export class UpstoxMarketDataService {
     if (!this.isConnected) return;
 
     try {
-      await this.marketStreamer.unsubscribe(instrumentKeys);
-      
       // Remove from tracked subscriptions
-      instrumentKeys.forEach(key => this.subscriptions.delete(key));
-      
-      console.log(`Unsubscribed from ${instrumentKeys.length} instruments`);
+      instrumentKeys.forEach(key => {
+        this.subscriptions.delete(key);
+        const index = this.pollingInstruments.indexOf(key);
+        if (index > -1) {
+          this.pollingInstruments.splice(index, 1);
+        }
+      });
+
+      // If no more instruments to poll, stop polling
+      if (this.pollingInstruments.length === 0 && this.pollingInterval) {
+        clearInterval(this.pollingInterval);
+        this.pollingInterval = null;
+      }
+
+      console.log(`📊 Unsubscribed from ${instrumentKeys.length} instruments`);
     } catch (error) {
       console.error('Error unsubscribing from instruments:', error);
       throw error;
     }
   }
 
-  // Change subscription mode
+  // Change subscription mode (for REST API polling, this just logs the change)
   async changeMode(instrumentKeys: string[], mode: 'ltpc' | 'full' | 'full_d30' | 'option_greeks'): Promise<void> {
     if (!this.isConnected) return;
 
     try {
-      await this.marketStreamer.changeMode(instrumentKeys, mode);
-      console.log(`Changed mode to ${mode} for ${instrumentKeys.length} instruments`);
+      // For REST API mode, we just log the mode change
+      // The actual data fetched depends on the API endpoint used
+      console.log(`📊 Changed mode to ${mode} for ${instrumentKeys.length} instruments (REST API mode)`);
     } catch (error) {
       console.error('Error changing subscription mode:', error);
       throw error;
@@ -361,14 +478,18 @@ export class UpstoxMarketDataService {
 
   // Disconnect all connections
   disconnect(): void {
-    if (this.marketStreamer) {
-      this.marketStreamer.disconnect();
+    // Stop polling
+    if (this.pollingInterval) {
+      clearInterval(this.pollingInterval);
+      this.pollingInterval = null;
     }
-    if (this.portfolioStreamer) {
-      this.portfolioStreamer.disconnect();
-    }
+
+    // Clear state
     this.isConnected = false;
     this.subscriptions.clear();
+    this.pollingInstruments = [];
+
+    console.log('📊 Upstox connections disconnected (REST API mode)');
   }
 
   // Getters

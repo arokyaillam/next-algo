@@ -164,17 +164,21 @@ export async function getUpstoxUserProfile(accessToken: string) {
 
 // Get market data (for testing connection)
 export async function getMarketData(accessToken: string, instrumentKey: string = 'NSE_INDEX|Nifty 50') {
-  const response = await fetch(`${UPSTOX_BASE_URL}/v2/market-quote/ltp`, {
+  const url = new URL(`${UPSTOX_BASE_URL}/v2/market-quote/ltp`)
+  url.searchParams.append('instrument_key', instrumentKey)
+
+  const response = await fetch(url.toString(), {
     method: 'GET',
     headers: {
       'Authorization': `Bearer ${accessToken}`,
       'Accept': 'application/json',
     },
-    // Add query params
   })
 
   if (!response.ok) {
-    throw new Error('Failed to fetch market data')
+    const errorText = await response.text()
+    console.error('Upstox API Error:', response.status, errorText)
+    throw new Error(`Failed to fetch market data: ${response.status} ${response.statusText}`)
   }
 
   return response.json()

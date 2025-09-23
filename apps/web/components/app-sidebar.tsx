@@ -9,7 +9,8 @@ import {
   Home,
   Activity,
   PieChart,
-  User
+  User,
+  TestTube
 } from "lucide-react"
 
 import {
@@ -61,6 +62,14 @@ const menuItems = [
   }
 ]
 
+const testItems = [
+  {
+    title: "Test Market Data",
+    url: "/test-market-data",
+    icon: TestTube,
+  }
+]
+
 const settingsItems = [
   {
     title: "Profile",
@@ -106,6 +115,25 @@ export function AppSidebar() {
           <SidebarGroupContent>
             <SidebarMenu>
               {menuItems.map((item) => (
+                <SidebarMenuItem key={item.title}>
+                  <SidebarMenuButton asChild>
+                    <a href={item.url} className="flex items-center gap-2">
+                      <item.icon className="h-4 w-4" />
+                      <span>{item.title}</span>
+                    </a>
+                  </SidebarMenuButton>
+                </SidebarMenuItem>
+              ))}
+            </SidebarMenu>
+          </SidebarGroupContent>
+        </SidebarGroup>
+
+        {/* Testing Section */}
+        <SidebarGroup>
+          <SidebarGroupLabel>Testing</SidebarGroupLabel>
+          <SidebarGroupContent>
+            <SidebarMenu>
+              {testItems.map((item) => (
                 <SidebarMenuItem key={item.title}>
                   <SidebarMenuButton asChild>
                     <a href={item.url} className="flex items-center gap-2">

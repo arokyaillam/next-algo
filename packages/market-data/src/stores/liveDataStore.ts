@@ -241,7 +241,15 @@ export const useLiveDataStore = create<LiveDataState & LiveDataActions>()(
     // Subscribe to instruments
     subscribe: async (instrumentKeys: string[], mode = 'full' as const) => {
       const { upstoxService, isConnected } = get()
-      
+
+      console.log('🔍 liveDataStore.subscribe called with:', {
+        instrumentKeys,
+        type: typeof instrumentKeys,
+        isArray: Array.isArray(instrumentKeys),
+        length: instrumentKeys?.length,
+        mode
+      });
+
       if (!upstoxService || !isConnected) {
         throw new Error('Not connected to market data stream')
       }
@@ -321,7 +329,7 @@ export const useLiveDataStore = create<LiveDataState & LiveDataActions>()(
       set(state => {
         const newLiveData = new Map(state.liveData)
         const existing = newLiveData.get(data.instrumentKey!) || {} as LiveMarketData
-        
+
         newLiveData.set(data.instrumentKey!, {
           ...existing,
           ...data,
